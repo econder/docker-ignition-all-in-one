@@ -1,0 +1,88 @@
+version: "3.8"
+
+secrets:
+  mysql-root:
+    file: ./secrets/mysql_root.txt
+  mysql-schema:
+    file: ./secrets/mysql_schema.txt
+  ignition-gateway:
+    file: ./secrets/ignition_gateway.txt
+
+volumes:
+  mysql-data:
+    name: ${MYSQL_VOLUME_NAME}
+  mysql-adminer-data:
+    name: ${ADMINER_VOLUME_NAME}
+  gw1-data:
+    name: ${IGW_1_VOLUME_NAME}
+
+services:
+  # Adminer
+  adminer:
+    image: adminer
+    container_name: ${ADMINER_CONTAINER_NAME}
+    ports:
+      - ${ADMINER_PORT}:8080
+    #links:
+      #- mysql:${MYSQL_SERVER_NAME}
+    restart: always
+
+
+  # MySQL DB
+  mysql:
+    image: mysql:${MYSQL_VERSION}
+    container_name: ${MYSQL_CONTAINER_NAME}
+    ports:
+      - ${MYSQL_PORT}:3306
+    expose:
+      - 3306
+    restart: always
+    volumes:
+      - mysql-data:/var/lib/mysql
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DB_NAME}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD_FILE: /run/secrets/mysql-schema
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql-root
+    secrets:
+      - mysql-root
+      - mysql-schema
+
+
+  # Ignition Gateway 1 - Distributor
+  gateway-1:
+    pull_policy: build    # Auto-rebuild each time
+    build:
+      context: mr-build
+      args:
+        IGNITION_VERSION: ${IGW_1_VERSION}
+    image: waterminds/ignition-dev:${IGW_1_VERSION}
+    hostname: ${IGW_1_CONTAINER_NAME}
+    container_name: ${IGW_1_CONTAINER_NAME}
+    ports:
+      - ${IGW_1_PORT}:8088
+      - ${IGW_1_PORT_SSL}:8043
+      - ${IGW_1_PORT_MQTT}:1883
+    expose:
+      - 8060
+      - 1883 # MQTT (tcp)
+      - 8883 # MQTT (ssl)
+    links:
+      - mysql:${MYSQL_SERVER_NAME}
+    volumes:
+      - gw1-data:/usr/local/bin/ignition/data
+    environment:
+      - ACCEPT_IGNITION_EULA=Y
+      - GATEWAY_ADMIN_USERNAME=admin
+      - GATEWAY_ADMIN_PASSWORD_FILE=/run/secrets/ignition-gateway
+      - IGNITION_EDITION=${IGW_1_EDITION}
+      - TZ=${IGW_1_TIMEZONE}
+      - GATEWAY_NETWORK_0_HOST=${IGW_3_CONTAINER_NAME}
+    secrets:
+      - ignition-gateway
+    command: >
+      -n ${IGW_1_CONTAINER_NAME}
+      -m ${IGW_1_MEMORY}
+      -r /waterminds-dev-distributor.gwbk
+      --wrapper.java.initmemory=${IGW_1_MEMORY_INIT}
+      -Dignition.allowunsignedmodules=true
